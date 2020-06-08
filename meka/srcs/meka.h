@@ -114,6 +114,7 @@ struct TSMS_TYPE
     int     Pages_Mask_8k,  Pages_Count_8k;
     int     Pages_Mask_16k, Pages_Count_16k;
     long    Size_ROM;
+	long	RealSize_ROM;
     u8      Port3F;
     int     VDP_VideoMode, VDP_New_VideoMode;
     int     VDP_Video_Change;

@@ -496,7 +496,7 @@ int             Load_ROM_File(const char *filename_ext)
         return (MEKA_ERR_MEMORY);           // Not enough memory
 
     // Read data then close file ------------------------------------------------
-    if (fread (ROM, 1, tsms.Size_ROM, f) != (unsigned int)tsms.Size_ROM)
+    if (fread (ROM, 1, tsms.RealSize_ROM, f) != (unsigned int)tsms.RealSize_ROM)
         return (MEKA_ERR_FILE_READ);        // Error reading file
     fclose (f);
 
@@ -515,6 +515,31 @@ static int      Load_ROM_Init_Memory ()
     u8 *        p;
     int         alloc_size;
 
+
+	// HACK HACK HACK!
+	//
+	// Saving scores to flash is normally done into banks that
+	// are past the end of the "ROM". This memory must be allocated, and we need
+	// the mapper to let us point a slot to one of those instead of wraping
+	// back to bank 0 (which happens if the size is not changed before the masks
+	// are computed below...)
+	//
+	// This here is a quick workaround to make sure memory for least one 64k
+	// additional sector of flash is allocated. All this assumes only 64k
+	// is used for saving..
+	//
+	// If only there was a header to declare the size of the flash chip instead...
+	//
+	tsms.RealSize_ROM = tsms.Size_ROM;
+	if (tsms.Size_ROM < 0x20000) {
+		tsms.Size_ROM = 0x20000;
+	} else {
+		tsms.Size_ROM += 0x10000;
+		return -1;
+	}
+	printf("FLASH SIZE HACK size=%ld real_size=%ld \n", tsms.Size_ROM, tsms.RealSize_ROM);
+
+
     // FIXME: The computation below are so old that I should be checking them someday. I
     // I'm sure that something wrong lies here.
     tsms.Pages_Mask_8k = 1;
@@ -531,6 +556,7 @@ static int      Load_ROM_Init_Memory ()
         tsms.Pages_Mask_16k *= 2;
     tsms.Pages_Mask_16k --;
     tsms.Pages_Count_16k --;
+
 
     // Calculate allocation size to upper bound of Pages_Count_16k
     // If ROM is smaller than 48 kb, malloc 48 kb to avoid problem reading

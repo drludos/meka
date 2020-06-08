@@ -76,7 +76,15 @@ void        BMemory_Save (void)
     BMemory_Verify_Usage();
     switch (g_machine.mapper)
     {
-    case MAPPER_Standard:       if (sms.SRAM_Pages == 0) return; break;
+    case MAPPER_Standard:
+				// HACK for saving on flash. The extra size is what must be backed up and restored
+				if (tsms.RealSize_ROM != tsms.Size_ROM) {
+					break;
+				}
+
+				if (sms.SRAM_Pages == 0) return;
+				break;
+
     case MAPPER_93c46:          break;
     default:                    return;
     }
@@ -116,6 +124,16 @@ void    BMemory_Save_State (FILE *f)
 
 void    BMemory_SRAM_Load (FILE *f)
 {
+	if (tsms.RealSize_ROM != tsms.Size_ROM) {
+		int size = tsms.Size_ROM - tsms.RealSize_ROM;
+
+        if (fread (ROM + tsms.RealSize_ROM, size, 1, f) == 1) {
+			printf("OK\n");
+			Msg(MSGT_USER, "Loaded FLASH backup of %d bytes", size);
+		}
+		return;
+	}
+
     sms.SRAM_Pages = 0;
     do
     {
@@ -134,6 +152,21 @@ void    BMemory_SRAM_Load (FILE *f)
 
 void    BMemory_SRAM_Save (FILE *f)
 {
+
+	if (tsms.RealSize_ROM != tsms.Size_ROM)
+	{
+		int size = tsms.Size_ROM - tsms.RealSize_ROM;
+
+    	if (f && fwrite (ROM + tsms.RealSize_ROM, size, 1, f) == 1) {
+			Msg(MSGT_USER, "Wrote FLASH backup of %d bytes", size);
+		}
+		else {
+			Msg(MSGT_USER, "Could not save flash content");
+		}
+
+		return;
+	}
+
     if (f && fwrite (SRAM, sms.SRAM_Pages * 0x2000, 1, f) == 1)
         Msg(MSGT_USER, Msg_Get(MSG_SRAM_Wrote), sms.SRAM_Pages * 8);
     else

@@ -163,8 +163,99 @@ int         Mapper_Autodetect(void)
     return (MAPPER_Auto);
 }
 
+
+#define FLASH_CHIP_STATE_READ	0
+#define FLASH_CHIP_STATE_U1		1	// Cycle 1 (0xAA written to 0x555)
+#define FLASH_CHIP_STATE_U2		2	// Cycle 2 (0x55 written to 0x2AA)
+#define FLASH_CHIP_STATE_90		3	// Cycle 3 (Command 0x90 written to 0x555)
+#define FLASH_CHIP_STATE_80		4	// Cycle 3 (Command 0x80 written to 0x555)
+#define FLASH_CHIP_STATE_A0		5	// Cycle 3 (Command 0x80 written to 0x555)
+#define FLASH_CHIP_STATE_80_4	6	// Cycle 4 (0xAA written to 0x555)
+#define FLASH_CHIP_STATE_80_5	7	// Cycle 5 (0x55 written to 0x2AA)
+
+static uint8_t flash_chip_state = 0;
+
 WRITE_FUNC (Write_Default)
 {
+	if ((Addr < 0xC000))
+	{
+		switch(flash_chip_state)
+		{
+			case FLASH_CHIP_STATE_READ:
+				if (((Addr & 0x07FF) == 0x555) && (Value == 0xAA)) {
+					flash_chip_state = FLASH_CHIP_STATE_U1;
+				}
+				break;
+
+			case FLASH_CHIP_STATE_U1:
+				if (((Addr & 0x07FF) == 0x2AA) && (Value == 0x55)) {
+					flash_chip_state = FLASH_CHIP_STATE_U2;
+				} else {
+					flash_chip_state = FLASH_CHIP_STATE_READ;
+				}
+				break;
+
+			case FLASH_CHIP_STATE_U2:
+				if (((Addr & 0x07FF) == 0x555))
+				{
+					if (Value == 0x90) { // Read Silicon ID command
+						flash_chip_state = FLASH_CHIP_STATE_90;
+            			Msg(MSGT_DEBUG, "Flash read ID command");
+
+					} else if (Value == 0x80) { // Chip / Sector Erase
+						flash_chip_state = FLASH_CHIP_STATE_80;
+					} else if (Value == 0xA0) { // Program
+						flash_chip_state = FLASH_CHIP_STATE_A0;
+					} else {
+						flash_chip_state = FLASH_CHIP_STATE_READ;
+					}
+				}
+				break;
+
+			case FLASH_CHIP_STATE_90:
+				flash_chip_state = FLASH_CHIP_STATE_READ;
+				break;
+
+			case FLASH_CHIP_STATE_80:
+				if (((Addr & 0x07FF) == 0x555) && (Value == 0xAA)) {
+					flash_chip_state = FLASH_CHIP_STATE_80_4;
+				} else {
+					flash_chip_state = FLASH_CHIP_STATE_READ;
+				}
+				break;
+
+			case FLASH_CHIP_STATE_80_4:
+				if (((Addr & 0x07FF) == 0x2AA) && (Value == 0x55)) {
+					flash_chip_state = FLASH_CHIP_STATE_80_5;
+				} else {
+					flash_chip_state = FLASH_CHIP_STATE_READ;
+				}
+				break;
+
+			case FLASH_CHIP_STATE_80_5:
+				if (((Addr & 0x07FF) == 0x555) && (Value == 0x10)) {
+					Msg(MSGT_DEBUG, "Chip erase command not implemented - ignored");
+					flash_chip_state = FLASH_CHIP_STATE_READ;
+				} else if (Value == 0x30) {
+					unsigned int physaddr = g_machine.mapper_regs[Addr >> 14] * 0x4000 + (Addr & 0x3FFF);
+					Msg(MSGT_DEBUG, "Sector erase 0x%06x", physaddr);
+					memset(ROM + physaddr, 0xFF, 0x10000);
+
+					flash_chip_state = FLASH_CHIP_STATE_READ;
+				} else {
+					flash_chip_state = FLASH_CHIP_STATE_READ;
+				}
+				break;
+
+			case FLASH_CHIP_STATE_A0:
+				const unsigned int page = (Addr >> 13);
+				Mem_Pages [page] [Addr] = Value;
+				flash_chip_state = FLASH_CHIP_STATE_READ;
+				break;
+
+		}
+	}
+
     if ((Addr & 0xFFF8) == 0xFFF8)
     {
         switch (Addr & 0x7)
@@ -229,7 +320,8 @@ WRITE_FUNC (Write_Default)
             {
                 Map_16k_ROM (4, g_machine.mapper_regs[2] * 2);
             }
-            return;
+
+			return;
         default: // 0xFFF8, 0xFFF9, 0xFFFA, 0xFFFB: Glasse Register ------------------
             Mem_Pages [7] [Addr] = sms.Glasses_Register = Value;
             return;
@@ -717,6 +809,20 @@ WRITE_FUNC (Write_Mapper_SMS_ActionReplay)
 
 READ_FUNC (Read_Default)
 {
+	if (flash_chip_state != FLASH_CHIP_STATE_READ) {
+		if (Addr < 0xC000) {
+			if (flash_chip_state == FLASH_CHIP_STATE_90) {
+				// Read silicon ID command
+				if ((Addr & 3)==0) {
+					return 0xC2;
+				} else if ((Addr & 3)==1) {
+					return 0xA4;
+				}
+			}
+		}
+	}
+
+
     #ifdef DEBUG_UNINITIALIZED_RAM_ACCESSES
     if (Addr >= 0xC000 && Addr <= 0xFFFF)
     {
